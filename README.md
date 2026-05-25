@@ -116,6 +116,8 @@ El frontend se conecta **directamente** a Supabase sin ningún servidor intermed
 
 ## Setup rápido
 
+### Con Supabase Cloud (recomendado)
+
 ```bash
 # 1. Backend — ejecutar en SQL Editor de Supabase:
 #    supabase/migrations/001_schema_clean.sql
@@ -142,18 +144,66 @@ npm run build
 cd ..
 node server.js                 # http://localhost:3000
 # Opcional: SUPABASE_URL=https://... node server.js (CSP ajustado)
+```
 
-# 6. Producción (Docker)
-# Opción A: con .env (recomendado)
-# Crear archivo .env en la raíz con:
+### Con Supabase local (Docker)
+
+Todo el stack (Postgres + Auth + REST + Studio + Frontend) se levanta con un comando:
+
+```powershell
+# 1. Requisito: Docker Desktop instalado y funcionando
+
+# 2. Inicio rápido (crea .env, construye frontend, levanta servicios, siembra datos)
+.\start.ps1
+
+# 3. Abrir en el navegador:
+#    Frontend:      http://localhost:3000
+#    Supabase Studio: http://localhost:54323
+#    Email testing: http://localhost:54324
+
+# 4. Para detener:
+docker compose down
+```
+
+El script `start.ps1` hace todo automáticamente:
+- Crea `frontend/.env` apuntando a `http://localhost:8000` (Kong gateway local)
+- Construye el frontend con `npm run build`
+- Levanta Postgres 15, GoTrue (Auth), PostgREST, Kong y Supabase Studio
+- Ejecuta `001_schema_clean.sql` como init script de la DB
+- Inserta `seed.sql` con datos de prueba
+
+Si prefieres paso a paso:
+
+```powershell
+# Crear .env para local
+@"
+VITE_SUPABASE_URL=http://localhost:8000
+VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0
+"@ | Set-Content frontend\.env
+
+# Construir frontend
+cd frontend; npm install; npm run build; cd ..
+
+# Levantar todo (DB, Auth, API, Studio + Frontend)
+docker compose up -d
+
+# Sembrar datos de prueba
+docker exec -i pc2-db psql -U postgres < supabase\seed.sql
+```
+
+### Producción (Docker) con Supabase Cloud
+
+```bash
+# Opción A: con archivo .env (recomendado)
+# Crear .env en la raíz con:
 #   VITE_SUPABASE_URL=https://tu-proyecto.supabase.co
 #   VITE_SUPABASE_ANON_KEY=tu-anon-key
 docker compose build
 docker compose up -d           # http://localhost:3000
 
-# Opción B: con argumentos (PowerShell)
-# docker compose build --build-arg "VITE_SUPABASE_URL=<url>" --build-arg "VITE_SUPABASE_ANON_KEY=<key>"
-# docker compose up -d
+# Opción B: argumentos inline (PowerShell)
+docker compose build --build-arg "VITE_SUPABASE_URL=<url>" --build-arg "VITE_SUPABASE_ANON_KEY=<key>"
+docker compose up -d
 ```
 
 ## API — Endpoints (directos a Supabase)

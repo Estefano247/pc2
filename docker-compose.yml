@@ -1,12 +1,115 @@
 services:
+  # ─── Supabase: Postgres + Auth + API ───
+  db:
+    image: supabase/postgres:15.8.1.031
+    container_name: pc2-db
+    ports:
+      - "54322:5432"
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pc2-db-data:/var/lib/postgresql/data
+      - ./supabase/migrations/001_schema_clean.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./supabase/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth:
+    image: supabase/gotrue:v2.177.1
+    container_name: pc2-auth
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:8000
+      GOTRUE_SITE_URL: http://localhost:3000
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_SMTP_HOST: inbucket
+      GOTRUE_SMTP_PORT: 2500
+      GOTRUE_DB_DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres?sslmode=disable
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters}
+      GOTRUE_DISABLE_SIGNUP: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  rest:
+    image: postgrest/postgrest:v12.2.4
+    container_name: pc2-rest
+    environment:
+      PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres?sslmode=disable
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  kong:
+    image: kong:2.8.1
+    container_name: pc2-kong
+    ports:
+      - "8000:8000"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PLUGINS: cors,key-auth
+    volumes:
+      - ./supabase/kong.yml:/etc/kong/kong.yml:ro
+    depends_on:
+      - auth
+      - rest
+
+  studio:
+    image: supabase/studio:v2025.04.15-f0cfb39
+    container_name: pc2-studio
+    ports:
+      - "54323:3000"
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      SUPABASE_URL: http://localhost:8000
+      SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+    depends_on:
+      - meta
+
+  meta:
+    image: supabase/postgres-meta:v0.84.2
+    container_name: pc2-meta
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  inbucket:
+    image: inbucket/inbucket:3.0.4
+    container_name: pc2-inbucket
+    ports:
+      - "54324:9000"
+
+  # ─── Frontend ───
   app:
     build:
       context: .
+      dockerfile: Dockerfile
       args:
-        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
-        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:8000}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
-      - SUPABASE_URL=${VITE_SUPABASE_URL}
+      - SUPABASE_URL=${VITE_SUPABASE_URL:-http://localhost:8000}
+    depends_on:
+      - db
+      - auth
+
+volumes:
+  pc2-db-data:
