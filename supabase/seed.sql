@@ -23,4 +23,5 @@ INSERT INTO inventario (libro_id, stock_actual) VALUES
     ((SELECT id FROM libros WHERE isbn = '978-84-376-0495-4'), 5),
     ((SELECT id FROM libros WHERE isbn = '978-84-376-0496-1'), 8),
     ((SELECT id FROM libros WHERE isbn = '978-84-376-0497-8'), 3),
-    ((SELECT id FROM libros WHERE isbn = '978-84-376-0498-5'), 12);
+    ((SELECT id FROM libros WHERE isbn = '978-84-376-0498-5'), 12)
+ON CONFLICT (libro_id) DO UPDATE SET stock_actual = EXCLUDED.stock_actual;

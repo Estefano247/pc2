@@ -1,7 +1,7 @@
 services:
   # ─── Supabase: Postgres + Auth + API ───
   db:
-    image: supabase/postgres:15.8.1.031
+    image: supabase/postgres:15.8.1.085
     container_name: pc2-db
     ports:
       - "54322:5432"
@@ -9,8 +9,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
       - pc2-db-data:/var/lib/postgresql/data
-      - ./supabase/migrations/001_schema_clean.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
-      - ./supabase/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -18,7 +16,7 @@ services:
       retries: 5
 
   auth:
-    image: supabase/gotrue:v2.177.1
+    image: supabase/gotrue:v2.186.0
     container_name: pc2-auth
     environment:
       GOTRUE_API_HOST: 0.0.0.0
@@ -36,7 +34,7 @@ services:
         condition: service_healthy
 
   rest:
-    image: postgrest/postgrest:v12.2.4
+    image: postgrest/postgrest:v14.8
     container_name: pc2-rest
     environment:
       PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/postgres?sslmode=disable
@@ -48,7 +46,7 @@ services:
         condition: service_healthy
 
   kong:
-    image: kong:2.8.1
+    image: kong:2.8.5
     container_name: pc2-kong
     ports:
       - "8000:8000"
@@ -63,7 +61,7 @@ services:
       - rest
 
   studio:
-    image: supabase/studio:v2025.04.15-f0cfb39
+    image: supabase/studio:latest
     container_name: pc2-studio
     ports:
       - "54323:3000"
@@ -76,7 +74,7 @@ services:
       - meta
 
   meta:
-    image: supabase/postgres-meta:v0.84.2
+    image: supabase/postgres-meta:v0.96.5
     container_name: pc2-meta
     environment:
       PG_META_PORT: 8080

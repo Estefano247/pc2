@@ -2,6 +2,19 @@
 -- Esquema completo de Librería MVP + Mejoras
 -- =============================================
 
+-- Roles necesarios para Docker local (ya existen en Supabase Cloud)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon NOINHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOINHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role NOINHERIT;
+  END IF;
+END $$;
+
 -- Tablas
 CREATE TABLE autores (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -32,7 +45,7 @@ CREATE TABLE inventario (
 
 CREATE TABLE carritos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    usuario_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    usuario_id UUID NOT NULL,
     libro_id UUID NOT NULL REFERENCES libros(id) ON DELETE CASCADE,
     cantidad INTEGER NOT NULL DEFAULT 1 CHECK (cantidad > 0),
     UNIQUE(usuario_id, libro_id)
@@ -51,7 +64,7 @@ CREATE INDEX idx_historial_inventario_libro ON historial_inventario(libro_id);
 
 CREATE TABLE ordenes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    usuario_id UUID NOT NULL REFERENCES auth.users(id),
+    usuario_id UUID NOT NULL,
     estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente','pagado','enviado','cancelado')),
     total DECIMAL(10,2) NOT NULL DEFAULT 0,
     direccion_envio TEXT NOT NULL,
@@ -59,7 +72,7 @@ CREATE TABLE ordenes (
 );
 
 CREATE TABLE admins (
-    usuario_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    usuario_id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
