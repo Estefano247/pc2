@@ -29,7 +29,7 @@ export default class ErrorBoundary extends React.Component {
             }}>
             Recargar página
           </button>
-          {process.env.NODE_ENV === "development" && (
+          {import.meta.env.DEV && (
             <pre style={{ marginTop: "2rem", fontSize: "0.8rem", color: "#94a3b8", maxWidth: "100%", overflow: "auto" }}>
               {this.state.error?.stack}
             </pre>

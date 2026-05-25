@@ -1,19 +1,16 @@
 import { useState, useEffect, useRef } from "react";
+import { supabase } from "../lib/supabase";
+import { normalizeError } from "../lib/supabaseHelpers";
 import toast from "react-hot-toast";
 
-function userError(msg) {
-  if (!msg) return "Error del servidor";
-  if (msg.includes("Invalid login credentials")) return "Email o contraseña incorrectos";
-  if (msg.includes("Email not confirmed")) return "Debes confirmar tu email antes de iniciar sesión";
-  if (msg.includes("rate_limit")) return "Demasiados intentos. Espera unos minutos.";
-  return "Error al iniciar sesión. Intenta de nuevo.";
-}
-
-export default function LoginModal({ onLogin, onClose }) {
+export default function LoginModal({ onClose }) {
+  const [mode, setMode] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
+
+  const isLogin = mode === "login";
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -33,10 +30,24 @@ export default function LoginModal({ onLogin, onClose }) {
     setLoading(true);
 
     try {
-      await onLogin(email.trim(), password);
-      toast.success("Inicio de sesión exitoso");
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+        toast.success("Inicio de sesión exitoso");
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+        });
+        if (error) throw error;
+        toast.success("Registro exitoso. Revisa tu correo para confirmar.");
+        setMode("login");
+      }
     } catch (err) {
-      toast.error(userError(err.message));
+      toast.error(normalizeError(err.message));
     } finally {
       setLoading(false);
     }
@@ -48,7 +59,7 @@ export default function LoginModal({ onLogin, onClose }) {
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Inicio de sesión"
+      aria-label={isLogin ? "Inicio de sesión" : "Registro"}
     >
       <div className="modal-card login-card" onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose} aria-label="Cerrar modal">
@@ -57,10 +68,12 @@ export default function LoginModal({ onLogin, onClose }) {
 
         <div className="login-icon">📚</div>
 
-        <p className="eyebrow">Bienvenido</p>
-        <h2>Iniciar sesión</h2>
+        <p className="eyebrow">{isLogin ? "Bienvenido" : "Nuevo usuario"}</p>
+        <h2>{isLogin ? "Iniciar sesión" : "Crear cuenta"}</h2>
         <p className="muted login-subtitle">
-          Accede para comprar libros, revisar tus órdenes y administrar la librería.
+          {isLogin
+            ? "Accede para comprar libros, revisar tus órdenes y administrar la librería."
+            : "Regístrate para comenzar a comprar libros."}
         </p>
 
         <form onSubmit={handleSubmit}>
@@ -91,12 +104,32 @@ export default function LoginModal({ onLogin, onClose }) {
           </div>
 
           <button type="submit" disabled={loading} className="login-btn">
-            {loading ? "Ingresando..." : "Ingresar"}
+            {loading ? "Procesando..." : (isLogin ? "Ingresar" : "Crear cuenta")}
           </button>
         </form>
 
         <div className="login-help">
-          ¿No tienes cuenta? Créala desde Supabase Auth.
+          {isLogin ? (
+            <>
+              ¿No tienes cuenta?{" "}
+              <button
+                onClick={() => setMode("register")}
+                style={{ background: "none", color: "var(--primary)", padding: 0, fontWeight: 600, textDecoration: "underline" }}
+              >
+                Regístrate
+              </button>
+            </>
+          ) : (
+            <>
+              ¿Ya tienes cuenta?{" "}
+              <button
+                onClick={() => setMode("login")}
+                style={{ background: "none", color: "var(--primary)", padding: 0, fontWeight: 600, textDecoration: "underline" }}
+              >
+                Inicia sesión
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

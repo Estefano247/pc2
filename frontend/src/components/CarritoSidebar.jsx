@@ -1,35 +1,23 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
+import { useAuthContext } from "../contexts/AuthContext";
+import { useCart } from "../contexts/CartContext";
+import { rpcCall, normalizeError, formatPrice } from "../lib/supabaseHelpers";
 import toast from "react-hot-toast";
 
-const ERROR_MSGS = {
-  stock_insuficiente: "Stock insuficiente para completar la compra",
-  "Stock insuficiente": "Stock insuficiente para completar la compra",
-  "Carrito vac": "El carrito está vacío",
-  "Dirección de envío requerida": "Dirección de envío requerida",
-};
+const DIRECCION_MAX_LENGTH = 500;
 
-function userError(msg) {
-  if (!msg) return "Error del servidor";
-  for (const [key, val] of Object.entries(ERROR_MSGS)) {
-    if (msg.includes(key)) return val;
-  }
-  return "Error al procesar la compra. Intenta de nuevo.";
-}
-
-export default function CarritoSidebar({ cart, setCart, user }) {
+export default function CarritoSidebar() {
+  const { user } = useAuthContext();
+  const { cart, removeItem, clearCart, total, cantidadTotal } = useCart();
   const [direccion, setDireccion] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const total = cart.reduce((s, i) => s + Number(i.precio) * i.cantidad, 0);
-  const cantidadTotal = cart.reduce((s, i) => s + i.cantidad, 0);
-
-  const removeItem = (index) => {
-    setCart((prev) => prev.filter((_, idx) => idx !== index));
-  };
-
   const checkout = async () => {
     if (!direccion.trim()) return toast.error("Dirección de envío requerida");
+    if (direccion.trim().length > DIRECCION_MAX_LENGTH) {
+      return toast.error(`La dirección no puede superar los ${DIRECCION_MAX_LENGTH} caracteres`);
+    }
     if (!cart.length) return toast.error("Carrito vacío");
 
     setLoading(true);
@@ -46,17 +34,15 @@ export default function CarritoSidebar({ cart, setCart, user }) {
 
       if (upsertError) throw upsertError;
 
-      const { error } = await supabase.rpc("realizar_checkout", {
+      await rpcCall("realizar_checkout", {
         p_direccion_envio: direccion.trim(),
       });
 
-      if (error) throw error;
-
       toast.success("¡Gracias por tu compra!");
-      setCart([]);
+      clearCart();
       setDireccion("");
     } catch (err) {
-      toast.error(userError(err.message));
+      toast.error(normalizeError(err.message));
     } finally {
       setLoading(false);
     }
@@ -85,12 +71,12 @@ export default function CarritoSidebar({ cart, setCart, user }) {
               <div className="cart-item-info">
                 <strong>{c.titulo}</strong>
                 <span>
-                  {c.cantidad} x ${Number(c.precio).toFixed(2)}
+                  {c.cantidad} x {formatPrice(c.precio)}
                 </span>
               </div>
 
               <div className="cart-item-actions">
-                <span>${(Number(c.precio) * c.cantidad).toFixed(2)}</span>
+                <span>{formatPrice(Number(c.precio) * c.cantidad)}</span>
                 <button
                   onClick={() => removeItem(i)}
                   className="cart-remove"
@@ -107,7 +93,7 @@ export default function CarritoSidebar({ cart, setCart, user }) {
       <div className="cart-footer">
         <div className="cart-total">
           <span>Total</span>
-          <strong>${total.toFixed(2)}</strong>
+          <strong>{formatPrice(total)}</strong>
         </div>
 
         <label htmlFor="direccion">Dirección de envío</label>
@@ -115,10 +101,14 @@ export default function CarritoSidebar({ cart, setCart, user }) {
           id="direccion"
           placeholder="Ej. Av. Los Olivos 123, Lima"
           value={direccion}
-          onChange={(e) => setDireccion(e.target.value)}
+          onChange={(e) => setDireccion(e.target.value.slice(0, DIRECCION_MAX_LENGTH))}
           aria-label="Dirección de envío"
           rows={3}
+          maxLength={DIRECCION_MAX_LENGTH}
         />
+        <small style={{ color: "#94a3b8", fontSize: "0.75rem" }}>
+          {direccion.length}/{DIRECCION_MAX_LENGTH}
+        </small>
 
         <button
           onClick={checkout}

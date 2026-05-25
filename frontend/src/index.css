@@ -698,3 +698,53 @@ select:focus {
   min-width: 80px;
   height: 40px;
 }
+
+/* ===== Paginación ===== */
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2rem;
+  padding: 1rem 0;
+}
+
+.page-info {
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.pagination button:disabled {
+  opacity: 0.4;
+}
+
+.pagination button {
+  min-width: 100px;
+}
+
+/* ===== Skeleton loading ===== */
+
+.skeleton {
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-book {
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  pointer-events: none;
+}
+
+.skeleton-cover {
+  background: linear-gradient(135deg, #cbd5e1, #e2e8f0);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}

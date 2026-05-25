@@ -1,4 +1,8 @@
-export default function NavSidebar({ user, view, onNavigate, onLogout }) {
+import { useAuthContext } from "../contexts/AuthContext";
+
+export default function NavSidebar({ view, onNavigate }) {
+  const { user, logout } = useAuthContext();
+
   return (
     <nav className="nav-side">
       <h2>LibreríaApp</h2>
@@ -9,7 +13,7 @@ export default function NavSidebar({ user, view, onNavigate, onLogout }) {
       <button className={`nav-link ${view === "admin" ? "active" : ""}`}
         onClick={() => onNavigate("admin")}>Panel Admin</button>
       {user && (
-        <button className="nav-link logout" onClick={onLogout}>Cerrar Sesión</button>
+        <button className="nav-link logout" onClick={logout}>Cerrar Sesión</button>
       )}
     </nav>
   );

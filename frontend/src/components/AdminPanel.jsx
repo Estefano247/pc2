@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { useAuthContext } from "../contexts/AuthContext";
+import { normalizeError } from "../lib/supabaseHelpers";
 import toast from "react-hot-toast";
 
-export default function AdminPanel({ user }) {
+export default function AdminPanel() {
+  const { user } = useAuthContext();
   const [isAdmin, setIsAdmin] = useState(false);
   const [checking, setChecking] = useState(true);
   const [autores, setAutores] = useState([]);
@@ -35,122 +38,114 @@ const cargarLibrosAdmin = async () => {
   const { data } = await supabase
     .from("libros")
     .select("*")
+    .is("deleted_at", null)
     .order("titulo");
 
   if (data) setLibros(data);
 };
 
-  const traducirError = (msg) => {
-    if (!msg) return "Error del servidor";
-    if (msg.includes("42501") || msg.includes("permission denied") || msg.includes("permission_denied_for_function"))
-      return "No tienes permisos de administrador para esta acción";
-    if (msg.includes("stock_insuficiente") || msg.includes("Stock insuficiente"))
-      return "Stock insuficiente para completar la operación";
-    if (msg.includes("Invalid login credentials"))
-      return "Email o contraseña incorrectos";
-    return msg;
-  };
-
   const guardarAutor = async (e) => {
     e.preventDefault();
     setLoadingAutor(true);
-    const { error } = await supabase.from("autores").insert([{ nombre: autorNombre }]);
-    setLoadingAutor(false);
-    if (error) return alert(traducirError(error.message));
-    alert("Autor creado!");
-    setAutorNombre("");
-    const { data } = await supabase.from("autores").select("*").order("nombre");
-    if (data) setAutores(data);
+    try {
+      const { error } = await supabase.from("autores").insert([{ nombre: autorNombre }]);
+      if (error) throw error;
+      toast.success("Autor creado!");
+      setAutorNombre("");
+      const { data } = await supabase.from("autores").select("*").order("nombre");
+      if (data) setAutores(data);
+    } catch (err) {
+      toast.error(normalizeError(err.message));
+    } finally {
+      setLoadingAutor(false);
+    }
   };
 
   const guardarLibro = async (e) => {
     e.preventDefault();
     setLoadingLibro(true);
-    let data, error;
+    try {
+      let data, error;
 
-if (editandoId) {
-  const response = await supabase
-    .from("libros")
-    .update({
-      titulo: libro.titulo,
-      isbn: libro.isbn,
-      precio: parseFloat(libro.precio) || 0,
-      autor_id: libro.autor_id || null,
-      resumen: libro.resumen,
-      portada_url: libro.portada_url || null,
-    })
-    .eq("id", editandoId)
-    .select();
+      if (editandoId) {
+        const response = await supabase
+          .from("libros")
+          .update({
+            titulo: libro.titulo,
+            isbn: libro.isbn,
+            precio: parseFloat(libro.precio) || 0,
+            autor_id: libro.autor_id || null,
+            resumen: libro.resumen,
+            portada_url: libro.portada_url || null,
+          })
+          .eq("id", editandoId)
+          .select();
 
-  data = response.data;
-  error = response.error;
-} else {
-  const response = await supabase
-    .from("libros")
-    .insert([{
-      titulo: libro.titulo,
-      isbn: libro.isbn,
-      precio: parseFloat(libro.precio) || 0,
-      autor_id: libro.autor_id || null,
-      resumen: libro.resumen,
-      portada_url: libro.portada_url || null,
-    }])
-    .select();
+        data = response.data;
+        error = response.error;
+      } else {
+        const response = await supabase
+          .from("libros")
+          .insert([{
+            titulo: libro.titulo,
+            isbn: libro.isbn,
+            precio: parseFloat(libro.precio) || 0,
+            autor_id: libro.autor_id || null,
+            resumen: libro.resumen,
+            portada_url: libro.portada_url || null,
+          }])
+          .select();
 
-  data = response.data;
-  error = response.error;
-}
-    if (error) { setLoadingLibro(false); return alert(traducirError(error.message)); }
+        data = response.data;
+        error = response.error;
+      }
 
-    if (data?.[0]) {
-      await supabase.from("inventario").upsert(
-        { libro_id: data[0].id, stock_actual: parseInt(libro.stock) || 0 },
-        { onConflict: "libro_id" }
-      );
+      if (error) throw error;
+
+      if (data?.[0]) {
+        await supabase.from("inventario").upsert(
+          { libro_id: data[0].id, stock_actual: parseInt(libro.stock) || 0 },
+          { onConflict: "libro_id" }
+        );
+      }
+
+      toast.success(editandoId ? "Libro actualizado!" : "Libro creado!");
+      setLibro({ titulo: "", isbn: "", precio: "", autor_id: "", resumen: "", portada_url: "", stock: 0 });
+      setEditandoId(null);
+    } catch (err) {
+      toast.error(normalizeError(err.message));
+    } finally {
+      setLoadingLibro(false);
     }
-
-    setLoadingLibro(false);
-    alert("Libro creado!");
-    setLibro({ titulo: "", isbn: "", precio: "", autor_id: "", resumen: "", stock: 0 });
   };
 
   const eliminarLibro = async (id) => {
-  const confirmar = confirm("¿Eliminar este libro?");
+    const confirmar = confirm("¿Eliminar este libro?");
+    if (!confirmar) return;
 
-  if (!confirmar) return;
+    try {
+      const { error } = await supabase.from("libros").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      if (error) throw error;
+      toast.success("Libro eliminado");
+      cargarLibrosAdmin();
+    } catch (err) {
+      toast.error(normalizeError(err.message));
+    }
+  };
 
-  const { error } = await supabase
-    .from("libros")
-    .delete()
-    .eq("id", id);
-
-  if (error) {
-    return toast.error(traducirError(error.message));
-  }
-
-  toast.success("Libro eliminado");
-
-  cargarLibrosAdmin();
-};
-
-const editarLibro = (libroActual) => {
-  setLibro({
-    titulo: libroActual.titulo || "",
-    isbn: libroActual.isbn || "",
-    precio: libroActual.precio || "",
-    autor_id: libroActual.autor_id || "",
-    resumen: libroActual.resumen || "",
-    portada_url: libroActual.portada_url || "",
-    stock: libroActual.stock_actual || 0,
-  });
-
-  setEditandoId(libroActual.id);
-
-  window.scrollTo({
-    top: 0,
-    behavior: "smooth",
-  });
-};
+  const editarLibro = (libroActual) => {
+    setLibro({
+      titulo: libroActual.titulo || "",
+      isbn: libroActual.isbn || "",
+      precio: libroActual.precio || "",
+      autor_id: libroActual.autor_id || "",
+      resumen: libroActual.resumen || "",
+      portada_url: libroActual.portada_url || "",
+      stock: libroActual.stock_actual || 0,
+    });
+    setEditandoId(libroActual.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   if (checking) return <p style={{ color: "#94a3b8", marginTop: "2rem" }}>Verificando permisos...</p>;
 
@@ -173,17 +168,17 @@ const editarLibro = (libroActual) => {
   return (
     <>
       <div className="admin-header">
-  <div>
-    <p className="eyebrow">Zona administrativa</p>
-    <h1>Panel de Administración</h1>
-    <p className="muted">
-      Gestiona libros, autores e inventario de la librería.
-    </p>
-  </div>
-</div>
+        <div>
+          <p className="eyebrow">Zona administrativa</p>
+          <h1>Panel de Administración</h1>
+          <p className="muted">
+            Gestiona libros, autores e inventario de la librería.
+          </p>
+        </div>
+      </div>
 
       <div className="admin-card">
-        <h3 className="section-title">Agregar Nuevo Libro</h3>
+        <h3 className="section-title">{editandoId ? "Editar Libro" : "Agregar Nuevo Libro"}</h3>
         <form onSubmit={guardarLibro}>
           <div className="form-group"><label>Título</label>
             <input value={libro.titulo} onChange={(e) => setLibro({ ...libro, titulo: e.target.value })} required />
@@ -208,23 +203,19 @@ const editarLibro = (libroActual) => {
             </select>
           </div>
           <div className="form-group">
-  <label>URL de portada</label>
-  <input
-    placeholder="https://..."
-    value={libro.portada_url}
-    onChange={(e) =>
-      setLibro({ ...libro, portada_url: e.target.value })
-    }
-  />
-</div>
+            <label>URL de portada</label>
+            <input
+              placeholder="https://..."
+              value={libro.portada_url}
+              onChange={(e) => setLibro({ ...libro, portada_url: e.target.value })}
+            />
+          </div>
           <div className="form-group"><label>Resumen</label>
             <textarea value={libro.resumen} onChange={(e) => setLibro({ ...libro, resumen: e.target.value })} />
           </div>
           <button type="submit" disabled={loadingLibro}
             style={{ background: "var(--success)", color: "white", width: "100%", opacity: loadingLibro ? 0.6 : 1 }}>
-            {loadingLibro
-  ? editandoId ? "Guardando..." : "Publicando..."
-  : editandoId ? "Guardar Cambios" : "Publicar Libro"}
+            {loadingLibro ? (editandoId ? "Guardando..." : "Publicando...") : (editandoId ? "Guardar Cambios" : "Publicar Libro")}
           </button>
         </form>
       </div>
@@ -241,41 +232,27 @@ const editarLibro = (libroActual) => {
           </button>
         </form>
       </div>
+
       <div className="admin-card">
-  <h3 className="section-title">Gestionar Libros</h3>
-
-  <div className="admin-books">
-    {libros.map((l) => (
-      <div key={l.id} className="admin-book-item">
-        <div className="admin-book-info">
-          {l.portada_url && (
-            <img src={l.portada_url} alt={l.titulo} />
-          )}
-
-          <div>
-            <strong>{l.titulo}</strong>
-            <small>{l.isbn}</small>
-          </div>
+        <h3 className="section-title">Gestionar Libros</h3>
+        <div className="admin-books">
+          {libros.map((l) => (
+            <div key={l.id} className="admin-book-item">
+              <div className="admin-book-info">
+                {l.portada_url && (
+                  <img src={l.portada_url} alt={l.titulo} />
+                )}
+                <div>
+                  <strong>{l.titulo}</strong>
+                  <small>{l.isbn}</small>
+                </div>
+              </div>
+              <button className="edit-btn" onClick={() => editarLibro(l)}>Editar</button>
+              <button className="delete-btn" onClick={() => eliminarLibro(l.id)}>Eliminar</button>
+            </div>
+          ))}
         </div>
-
-        <button
-  className="edit-btn"
-  onClick={() => editarLibro(l)}
->
-  Editar
-</button>
-
-        <button
-          className="delete-btn"
-          onClick={() => eliminarLibro(l.id)}
-        >
-          Eliminar
-        </button>
       </div>
-    ))}
-  </div>
-</div>
     </>
   );
 }
-

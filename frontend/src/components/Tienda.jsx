@@ -1,74 +1,70 @@
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
+import { useAuthContext } from "../contexts/AuthContext";
+import { useCart } from "../contexts/CartContext";
+import { rpcCall, normalizeError, formatPrice } from "../lib/supabaseHelpers";
 import toast from "react-hot-toast";
+import { BookSkeleton } from "./Skeleton";
 
-export default function Tienda({ user, cart, setCart }) {
+const PAGE_SIZE = 12;
+
+export default function Tienda() {
+  const { user } = useAuthContext();
+  const { cart, addToCart } = useCart();
   const [libros, setLibros] = useState([]);
   const [query, setQuery] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
-    cargarLibros();
-  }, []);
+    const fetchBooks = async () => {
+      setLoading(true);
+      try {
+        const limit = PAGE_SIZE + 1;
+        let data;
+        if (searchTerm) {
+          data = await rpcCall("buscar_libros", {
+            p_query: searchTerm,
+            p_limit: limit,
+            p_offset: page * PAGE_SIZE,
+          });
+        } else {
+          data = await rpcCall("listar_libros_con_stock", {
+            p_limit: limit,
+            p_offset: page * PAGE_SIZE,
+          });
+        }
+        setHasMore((data || []).length > PAGE_SIZE);
+        setLibros(data ? data.slice(0, PAGE_SIZE) : []);
+      } catch (err) {
+        toast.error(normalizeError(err.message));
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchBooks();
+  }, [page, searchTerm]);
 
-  const cargarLibros = async () => {
-    setLoading(true);
-    const { data, error } = await supabase.rpc("listar_libros_con_stock");
-
-    if (!error && data) {
-      setLibros(data);
-    }
-
-    setLoading(false);
+  const buscar = () => {
+    setPage(0);
+    setSearchTerm(query.trim());
   };
 
-  const buscar = async () => {
-    const texto = query.trim();
-
-    if (!texto) return cargarLibros();
-
-    setLoading(true);
-    const { data, error } = await supabase.rpc("buscar_libros", {
-      p_query: texto,
-    });
-
-    if (!error && data) {
-      setLibros(data);
-    }
-
-    setLoading(false);
+  const limpiarBusqueda = () => {
+    setQuery("");
+    setSearchTerm("");
+    setPage(0);
   };
 
-  const addCart = (libro) => {
+  const handleAddCart = (libro) => {
     if (!user) return toast.error("Inicia sesión primero");
-
     const cantidadActual = cart.find((c) => c.id === libro.id)?.cantidad || 0;
-
     if (cantidadActual >= libro.stock_actual) {
       return toast.error("No puedes agregar más unidades que el stock disponible");
     }
-
-    setCart((prev) => {
-  const exist = prev.find((c) => c.id === libro.id);
-
-  const nuevoCart = exist
-    ? prev.map((c) =>
-        c.id === libro.id ? { ...c, cantidad: c.cantidad + 1 } : c
-      )
-    : [
-        ...prev,
-        {
-          id: libro.id,
-          titulo: libro.titulo,
-          precio: Number(libro.precio),
-          cantidad: 1,
-        },
-      ];
-
-       toast.success("Libro agregado al carrito");
-
-       return nuevoCart;
-  });
+    addToCart(libro);
+    toast.success("Libro agregado al carrito");
   };
 
   return (
@@ -93,70 +89,88 @@ export default function Tienda({ user, cart, setCart }) {
         <button onClick={buscar} className="btn-primary">
           {loading ? "Buscando..." : "Buscar"}
         </button>
-        {query && (
-          <button
-            className="btn-secondary"
-            onClick={() => {
-              setQuery("");
-              cargarLibros();
-            }}
-          >
+        {searchTerm && (
+          <button className="btn-secondary" onClick={limpiarBusqueda}>
             Limpiar
           </button>
         )}
       </div>
 
       {loading ? (
-        <div className="loading-card">Cargando libros...</div>
+        <div className="grid">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <BookSkeleton key={i} />
+          ))}
+        </div>
       ) : libros.length === 0 ? (
         <div className="empty-state">
           <h3>No se encontraron libros</h3>
           <p>Prueba con otro título o palabra clave.</p>
         </div>
       ) : (
-        <div className="grid">
-          {libros.map((l) => {
-            const stock = l.stock_actual ?? 0;
-            const agotado = stock <= 0;
+        <>
+          <div className="grid">
+            {libros.map((l) => {
+              const stock = l.stock_actual ?? 0;
+              const agotado = stock <= 0;
 
-            return (
-              <article key={l.id} className="libro">
-                <div className="book-cover">
-                  {l.portada_url ? (
-                    <img src={l.portada_url} alt={l.titulo} />
-                  ) : (
-                    <span>{l.titulo?.charAt(0) || "L"}</span>
-                  )}
-                </div>
-
-                <div className="book-content">
-                  <h4>{l.titulo}</h4>
-                  <p className="book-author">{l.autor_nombre || "Sin autor"}</p>
-                  <p className="book-summary">
-                    {l.resumen || "Sin resumen disponible."}
-                  </p>
-
-                  <div className="book-footer">
-                    <div>
-                      <strong>${Number(l.precio).toFixed(2)}</strong>
-                      <small className={agotado ? "stock-out" : "stock-ok"}>
-                        Stock: {stock}
-                      </small>
-                    </div>
-
-                    <button
-                      onClick={() => addCart(l)}
-                      className={agotado ? "btn-disabled" : "btn-primary"}
-                      disabled={agotado}
-                    >
-                      {agotado ? "Agotado" : "Añadir"}
-                    </button>
+              return (
+                <article key={l.id} className="libro">
+                  <div className="book-cover">
+                    {l.portada_url ? (
+                      <img src={l.portada_url} alt={l.titulo} />
+                    ) : (
+                      <span>{l.titulo?.charAt(0) || "L"}</span>
+                    )}
                   </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+
+                  <div className="book-content">
+                    <h4>{l.titulo}</h4>
+                    <p className="book-author">{l.autor_nombre || "Sin autor"}</p>
+                    <p className="book-summary">
+                      {l.resumen || "Sin resumen disponible."}
+                    </p>
+
+                    <div className="book-footer">
+                      <div>
+                        <strong>{formatPrice(l.precio)}</strong>
+                        <small className={agotado ? "stock-out" : "stock-ok"}>
+                          Stock: {stock}
+                        </small>
+                      </div>
+
+                      <button
+                        onClick={() => handleAddCart(l)}
+                        className={agotado ? "btn-disabled" : "btn-primary"}
+                        disabled={agotado}
+                      >
+                        {agotado ? "Agotado" : "Añadir"}
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="pagination">
+            <button
+              className="btn-secondary"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              Anterior
+            </button>
+            <span className="page-info">Página {page + 1}</span>
+            <button
+              className="btn-secondary"
+              disabled={!hasMore}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Siguiente
+            </button>
+          </div>
+        </>
       )}
     </section>
   );

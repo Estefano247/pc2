@@ -1,10 +1,15 @@
+-- =============================================
+-- Esquema completo de Librería MVP + Mejoras
+-- =============================================
+
 -- Tablas
 CREATE TABLE autores (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     nombre TEXT NOT NULL,
     biografia TEXT,
     fecha_nacimiento DATE,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    deleted_at TIMESTAMPTZ
 );
 
 CREATE TABLE libros (
@@ -15,7 +20,8 @@ CREATE TABLE libros (
     resumen TEXT,
     portada_url TEXT,
     autor_id UUID REFERENCES autores(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    deleted_at TIMESTAMPTZ
 );
 
 CREATE TABLE inventario (
@@ -31,6 +37,17 @@ CREATE TABLE carritos (
     cantidad INTEGER NOT NULL DEFAULT 1 CHECK (cantidad > 0),
     UNIQUE(usuario_id, libro_id)
 );
+
+CREATE TABLE historial_inventario (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    libro_id UUID NOT NULL REFERENCES libros(id) ON DELETE CASCADE,
+    stock_anterior INTEGER NOT NULL,
+    stock_nuevo INTEGER NOT NULL,
+    tipo_movimiento TEXT NOT NULL CHECK (tipo_movimiento IN ('venta', 'ajuste', 'devolucion', 'creacion')),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_historial_inventario_libro ON historial_inventario(libro_id);
 
 CREATE TABLE ordenes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -81,10 +98,16 @@ EXECUTE FUNCTION crear_inventario_al_insertar_libro();
 
 CREATE OR REPLACE FUNCTION actualizar_stock_post_venta()
 RETURNS TRIGGER AS $$
+DECLARE
+    v_stock INTEGER;
 BEGIN
-    IF (SELECT stock_actual FROM inventario WHERE libro_id = NEW.libro_id) < NEW.cantidad THEN
+    SELECT stock_actual INTO v_stock FROM inventario
+    WHERE libro_id = NEW.libro_id FOR UPDATE;
+
+    IF v_stock < NEW.cantidad THEN
         RAISE EXCEPTION 'Stock insuficiente';
     END IF;
+
     UPDATE inventario SET stock_actual = stock_actual - NEW.cantidad, ultima_actualizacion = now()
     WHERE libro_id = NEW.libro_id;
     RETURN NEW;
@@ -95,8 +118,27 @@ CREATE TRIGGER tr_descontar_stock
 AFTER INSERT ON orden_detalles FOR EACH ROW
 EXECUTE FUNCTION actualizar_stock_post_venta();
 
+CREATE OR REPLACE FUNCTION registrar_historial_inventario()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.stock_actual <> OLD.stock_actual THEN
+        INSERT INTO historial_inventario (libro_id, stock_anterior, stock_nuevo, tipo_movimiento)
+        VALUES (NEW.libro_id, OLD.stock_actual, NEW.stock_actual,
+            CASE WHEN NEW.stock_actual < OLD.stock_actual THEN 'venta' ELSE 'ajuste' END);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER tr_historial_inventario
+AFTER UPDATE ON inventario FOR EACH ROW
+EXECUTE FUNCTION registrar_historial_inventario();
+
 -- Funciones RPC
-CREATE OR REPLACE FUNCTION listar_libros_con_stock()
+CREATE OR REPLACE FUNCTION listar_libros_con_stock(
+    p_limit INT DEFAULT 12,
+    p_offset INT DEFAULT 0
+)
 RETURNS TABLE(id UUID, titulo TEXT, isbn TEXT, precio DECIMAL, resumen TEXT, portada_url TEXT, autor_id UUID, autor_nombre TEXT, stock_actual INTEGER)
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -105,12 +147,19 @@ BEGIN
     FROM libros l
     LEFT JOIN autores a ON a.id = l.autor_id
     LEFT JOIN inventario i ON i.libro_id = l.id
-    ORDER BY l.created_at DESC;
+    WHERE l.deleted_at IS NULL
+    ORDER BY l.created_at DESC
+    LIMIT p_limit
+    OFFSET p_offset;
 END;
 $$;
 GRANT EXECUTE ON FUNCTION listar_libros_con_stock TO anon, authenticated;
 
-CREATE OR REPLACE FUNCTION buscar_libros(p_query TEXT)
+CREATE OR REPLACE FUNCTION buscar_libros(
+    p_query TEXT,
+    p_limit INT DEFAULT 12,
+    p_offset INT DEFAULT 0
+)
 RETURNS TABLE(id UUID, titulo TEXT, isbn TEXT, precio DECIMAL, resumen TEXT, portada_url TEXT, autor_id UUID, autor_nombre TEXT, stock_actual INTEGER)
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
@@ -120,7 +169,10 @@ BEGIN
     LEFT JOIN autores a ON a.id = l.autor_id
     LEFT JOIN inventario i ON i.libro_id = l.id
     WHERE l.search_vector @@ plainto_tsquery('spanish', p_query)
-    ORDER BY l.created_at DESC;
+      AND l.deleted_at IS NULL
+    ORDER BY l.created_at DESC
+    LIMIT p_limit
+    OFFSET p_offset;
 END;
 $$;
 GRANT EXECUTE ON FUNCTION buscar_libros TO anon, authenticated;
@@ -133,12 +185,23 @@ DECLARE
     v_total DECIMAL(10,2);
 BEGIN
     IF v_usuario_id IS NULL THEN RAISE EXCEPTION 'No autenticado'; END IF;
+    IF length(p_direccion_envio) > 500 THEN
+        RAISE EXCEPTION 'direccion_muy_larga';
+    END IF;
+
+    -- Lock cart rows to prevent concurrent checkout race conditions
+    PERFORM 1 FROM carritos WHERE usuario_id = v_usuario_id FOR UPDATE;
+
     SELECT COALESCE(SUM(l.precio * c.cantidad), 0) INTO v_total
     FROM carritos c JOIN libros l ON l.id = c.libro_id WHERE c.usuario_id = v_usuario_id;
+
     INSERT INTO ordenes (usuario_id, total, direccion_envio) VALUES (v_usuario_id, v_total, p_direccion_envio) RETURNING id INTO v_orden_id;
+
     INSERT INTO orden_detalles (orden_id, libro_id, cantidad, precio_unitario_historico)
     SELECT v_orden_id, c.libro_id, c.cantidad, l.precio FROM carritos c JOIN libros l ON l.id = c.libro_id WHERE c.usuario_id = v_usuario_id;
+
     DELETE FROM carritos WHERE usuario_id = v_usuario_id;
+
     RETURN json_build_object('orden_id', v_orden_id, 'total', v_total, 'estado', 'pendiente');
 END;
 $$;

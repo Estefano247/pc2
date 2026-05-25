@@ -1,34 +1,23 @@
-import { useState, useEffect } from "react";
-import { useAuth } from "./hooks/useAuth";
+import { lazy, Suspense, useState, useEffect } from "react";
+import { useAuthContext } from "./contexts/AuthContext";
 import NavSidebar from "./components/NavSidebar";
 import AuthBar from "./components/AuthBar";
 import LoginModal from "./components/LoginModal";
 import Tienda from "./components/Tienda";
-import MisOrdenes from "./components/MisOrdenes";
-import AdminPanel from "./components/AdminPanel";
 import CarritoSidebar from "./components/CarritoSidebar";
 import { Toaster } from "react-hot-toast";
 
-const CART_KEY = "libreria_cart";
+const MisOrdenes = lazy(() => import("./components/MisOrdenes"));
+const AdminPanel = lazy(() => import("./components/AdminPanel"));
 
-function loadCart() {
-  try {
-    const saved = localStorage.getItem(CART_KEY);
-    return saved ? JSON.parse(saved) : [];
-  } catch {
-    return [];
-  }
+function LazyFallback() {
+  return <div className="loading-card" style={{ marginTop: "2rem" }}>Cargando...</div>;
 }
 
 export default function App() {
-  const { user, loading, login, logout } = useAuth();
+  const { user, loading } = useAuthContext();
   const [view, setView] = useState("tienda");
   const [showLogin, setShowLogin] = useState(false);
-  const [cart, setCart] = useState(loadCart);
-
-  useEffect(() => {
-    localStorage.setItem(CART_KEY, JSON.stringify(cart));
-  }, [cart]);
 
   useEffect(() => {
     if (!loading && !user) setShowLogin(true);
@@ -45,31 +34,24 @@ export default function App() {
   return (
     <div className="layout">
       <Toaster position="top-right" />
-      <NavSidebar user={user} view={view} onNavigate={setView} onLogout={logout} />
-
-      <AuthBar user={user} onLoginClick={() => setShowLogin(true)} onLogout={logout} />
-
+      <NavSidebar view={view} onNavigate={setView} />
+      <AuthBar onLoginClick={() => setShowLogin(true)} />
       <div className={`main-area ${!user ? "no-cart" : ""}`}>
         <div className={`view ${view === "tienda" ? "active" : ""}`}>
-          <Tienda user={user} cart={cart} setCart={setCart} />
+          <Tienda />
         </div>
-        <div className={`view ${view === "mis-ordenes" ? "active" : ""}`}>
-          <MisOrdenes user={user} />
-        </div>
-        <div className={`view ${view === "admin" ? "active" : ""}`}>
-          <AdminPanel user={user} />
-        </div>
+        <Suspense fallback={<LazyFallback />}>
+          <div className={`view ${view === "mis-ordenes" ? "active" : ""}`}>
+            <MisOrdenes />
+          </div>
+          <div className={`view ${view === "admin" ? "active" : ""}`}>
+            <AdminPanel />
+          </div>
+        </Suspense>
       </div>
-
-      {user && (
-        <CarritoSidebar cart={cart} setCart={setCart} user={user} />
-      )}
-
+      {user && <CarritoSidebar />}
       {showLogin && !user && (
-        <LoginModal
-          onLogin={login}
-          onClose={() => setShowLogin(false)}
-        />
+        <LoginModal onClose={() => setShowLogin(false)} />
       )}
     </div>
   );
